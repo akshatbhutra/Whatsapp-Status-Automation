@@ -33,48 +33,76 @@ async function getStatusViewers() {
     const myStatusBtn = page.getByText('My status').first();
     await myStatusBtn.click();
     
-    await page.waitForTimeout(2000);
+    let statusIndex = 1;
+    let hasNext = true;
 
-    console.log('Looking for the "See viewers" button...');
-    const viewsBtn = page.locator('button[aria-label="See viewers"]').first();
+    while (hasNext) {
+      console.log(`\n--- Checking Status #${statusIndex} ---`);
+      
+      // Allow a brief moment for the status UI and view count to fully render
+      await page.waitForTimeout(1500);
 
-    if (await viewsBtn.isVisible().catch(() => false)) {
-      await viewsBtn.click();
-    } else {
-      console.log('No viewers button found. You currently have 0 views on your status.');
-      await context.close();
-      return;
-    }
+      const viewsBtn = page.locator('button[aria-label="See viewers"]').first();
 
-    console.log('Waiting for the viewer popup to appear...');
-    // 1. Target the specific modal container
-    const popupModal = page.locator('div[data-testid="confirm-popup"]');
-    await popupModal.waitFor({ state: 'visible', timeout: 10000 });
+      if (await viewsBtn.isVisible().catch(() => false)) {
+        await viewsBtn.click();
+        
+        const popupModal = page.locator('div[data-testid="confirm-popup"]');
+        
+        // Wait to see if the modal successfully opens
+        const modalAppeared = await popupModal.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
 
-    console.log('Extracting viewer names from the popup...');
-    // 2. Scope the name search STRICTLY inside the popup container
-    const nameElements = popupModal.locator('div[data-testid="cell-frame-title"] span');
-    
-    const count = await nameElements.count();
-    const viewers = new Set(); 
+        if (modalAppeared) {
+          const nameElements = popupModal.locator('div[data-testid="cell-frame-title"] span');
+          const count = await nameElements.count();
+          const viewers = new Set(); 
 
-    for (let i = 0; i < count; i++) {
-      const name = await nameElements.nth(i).innerText();
-      if (name) {
-        viewers.add(name.trim());
+          for (let i = 0; i < count; i++) {
+            const name = await nameElements.nth(i).innerText();
+            if (name) {
+              viewers.add(name.trim());
+            }
+          }
+
+          const viewersArray = Array.from(viewers);
+
+          if (viewersArray.length > 0) {
+            console.log(`Status #${statusIndex} Viewed By (${viewersArray.length} people):`);
+            viewersArray.forEach((name, index) => {
+              console.log(`  ${index + 1}. ${name}`);
+            });
+          } else {
+            console.log(`Status #${statusIndex} has 0 views.`);
+          }
+
+          // Close the popup so the player resumes and we can click "Next status"
+          const closeBtn = popupModal.locator('button[aria-label="Close"]').first();
+          if (await closeBtn.isVisible().catch(() => false)) {
+            await closeBtn.click();
+          } else {
+            await page.keyboard.press('Escape'); 
+          }
+          
+          // Wait for the modal to completely disappear before moving on
+          await popupModal.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+        } else {
+          console.log(`Status #${statusIndex} has 0 views (Popup did not open).`);
+        }
+      } else {
+        console.log(`Status #${statusIndex} has 0 views (Button not visible).`);
       }
-    }
 
-    const viewersArray = Array.from(viewers);
-
-    if (viewersArray.length > 0) {
-      console.log(`\n=== Status Viewed By (${viewersArray.length} people) ===`);
-      viewersArray.forEach((name, index) => {
-        console.log(`${index + 1}. ${name}`);
-      });
-      console.log('=====================================\n');
-    } else {
-      console.log('The viewer list was opened, but no names could be extracted.');
+      // Check for the "Next status" arrow button using the precise aria-label
+      const nextBtn = page.locator('button[aria-label="Next status"]').first();
+      
+      if (await nextBtn.isVisible().catch(() => false)) {
+        await nextBtn.click();
+        statusIndex++;
+      } else {
+        console.log('\n=====================================');
+        console.log('No more statuses to check.');
+        hasNext = false;
+      }
     }
 
   } catch (error) {
