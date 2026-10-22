@@ -29,6 +29,16 @@ const SOURCES = [
     requiredTexts: ['हारे का सहारा', 'बाबा श्याम हमारा', 'जय श्री श्याम जी'],
     matchToday: 'relative-time',
   },
+  {
+    name: 'Butati Dham',
+    url: 'https://www.youtube.com/@Butatidham217/posts',
+    imagePath: path.resolve(__dirname, 'butati_photo.jpg'),
+    // Post text looks like: "Butati Dham Temple Today Darshan 15/10/26"
+    // Static text match only (case-insensitive) - the date is NOT checked,
+    // so the latest post with this text is always posted.
+    requiredTexts: ['Butati Dham Temple Today Darshan'],
+    matchToday: 'none',
+  },
 ];
 
 const MAX_POSTS_TO_CHECK = 5;
@@ -52,6 +62,36 @@ function getTodayHindiDate() {
   ];
 
   return { day, month: hindiMonths[monthIndex], year };
+}
+
+// Today's date in IST as the numeric variants a post might use,
+// e.g. "22/10/26", "22/10/2026", "22-10-26", "22.10.26" (with and without zero padding)
+function getTodayNumericDateVariants() {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).formatToParts(new Date());
+
+  const get = (type) => parts.find((p) => p.type === type).value;
+  const dd = get('day');
+  const mm = get('month');
+  const yyyy = get('year');
+  const yy = yyyy.slice(-2);
+  const d = String(parseInt(dd, 10));
+  const m = String(parseInt(mm, 10));
+
+  const variants = [];
+  for (const sep of ['/', '-', '.']) {
+    for (const day of new Set([dd, d])) {
+      for (const month of new Set([mm, m])) {
+        variants.push(`${day}${sep}${month}${sep}${yy}`);
+        variants.push(`${day}${sep}${month}${sep}${yyyy}`);
+      }
+    }
+  }
+  return variants;
 }
 
 const normalize = (s) => s.replace(/\s+/g, ' ').trim();
@@ -94,12 +134,19 @@ async function scrapeSource(page, source, todayDate) {
     const text = normalize(await post.locator('#content-text').innerText().catch(() => ''));
 
     // Static text match
-    const hasAllTexts = source.requiredTexts.every((t) => text.includes(normalize(t)));
+    const lowerText = text.toLowerCase();
+    const hasAllTexts = source.requiredTexts.every((t) => lowerText.includes(normalize(t).toLowerCase()));
     if (!hasAllTexts) continue;
 
     // "Is this today's post?" check
     if (source.matchToday === 'date-in-text') {
       if (!(text.includes(day) && text.includes(month) && text.includes(year))) continue;
+    } else if (source.matchToday === 'numeric-date-in-text') {
+      const variants = getTodayNumericDateVariants();
+      if (!variants.some((v) => text.includes(v))) {
+        console.log(`[${source.name}] Matching text found but date is not today (${variants[0]}). Skipping.`);
+        continue;
+      }
     } else if (source.matchToday === 'relative-time') {
       const timeText = await post
         .locator('#published-time-text')
