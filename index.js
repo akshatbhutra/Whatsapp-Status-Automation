@@ -41,6 +41,18 @@ const SOURCES = [
   },
 ];
 
+// ==========================================
+// STATIC IMAGES: no scraping, posted AFTER all scraped statuses are done
+// ==========================================
+const STATIC_IMAGES = [
+  {
+    name: 'Meera Bai',
+    // .jfif is a JPEG; it is copied to a temp .jpg at upload time for WhatsApp compatibility
+    sourcePath: path.resolve(__dirname, 'meerabai.jfif'),
+    uploadPath: path.resolve(__dirname, 'meerabai_upload.jpg'),
+  },
+];
+
 const MAX_POSTS_TO_CHECK = 5;
 
 // ==========================================
@@ -275,12 +287,7 @@ async function postWhatsAppStatus() {
       }
     }
 
-    if (savedSources.length === 0) {
-      console.log('Report: No matching posts found for any source today. Exiting script.');
-      return;
-    }
-
-    // ---- Step 2: post each image as its own status ----
+    // ---- Step 2: post every scraped image as its own status ----
     for (const source of savedSources) {
       try {
         await postImageToWhatsAppStatus(page, source.imagePath, source.name);
@@ -289,15 +296,31 @@ async function postWhatsAppStatus() {
       }
     }
 
+    // ---- Step 3: only after all scraped statuses are done, post static images ----
+    for (const img of STATIC_IMAGES) {
+      if (!fs.existsSync(img.sourcePath)) {
+        console.log(`[${img.name}] File not found at ${img.sourcePath}. Skipping.`);
+        continue;
+      }
+      try {
+        fs.copyFileSync(img.sourcePath, img.uploadPath); // .jfif -> .jpg copy
+        await postImageToWhatsAppStatus(page, img.uploadPath, img.name);
+      } catch (err) {
+        console.error(`[${img.name}] Failed to post status:`, err);
+      }
+    }
+
     console.log('\nAll done!');
   } catch (error) {
     console.error('An error occurred during execution:', error);
   } finally {
-    // Clean up images so they're fresh for tomorrow
-    for (const source of SOURCES) {
-      if (fs.existsSync(source.imagePath)) {
-        fs.unlinkSync(source.imagePath);
-      }
+    // Clean up downloaded images and temp copies (the original meerabai.jfif is untouched)
+    const tempFiles = [
+      ...SOURCES.map((s) => s.imagePath),
+      ...STATIC_IMAGES.map((i) => i.uploadPath),
+    ];
+    for (const file of tempFiles) {
+      if (fs.existsSync(file)) fs.unlinkSync(file);
     }
     await context.close();
   }
